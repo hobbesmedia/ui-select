@@ -133,6 +133,8 @@ app.controller('DemoCtrl', function($scope, $http, $timeout) {
 
   $scope.availableColors = ['Red','Green','Blue','Yellow','Magenta','Maroon','Umbra','Turquoise'];
 
+  $scope.singleDemo = {};
+  $scope.singleDemo.color = '';
   $scope.multipleDemo = {};
   $scope.multipleDemo.colors = ['Blue','Red'];
   $scope.multipleDemo.colors2 = ['Blue','Red'];
@@ -152,6 +154,13 @@ app.controller('DemoCtrl', function($scope, $http, $timeout) {
       $scope.addresses = response.data.results;
     });
   };
+
+  $scope.addPerson = function(item, model){
+    if(item.hasOwnProperty('isTag')) {
+      delete item.isTag;
+      $scope.people.push(item);
+    }
+  }
 
   $scope.country = {};
   $scope.countries = [ // Taken from https://gist.github.com/unceus/6501985

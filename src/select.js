@@ -393,7 +393,7 @@
             if ( ctrl.taggingLabel === false ) {
               if ( ctrl.activeIndex < 0 ) {
                 item = ctrl.tagging.fct !== undefined ? ctrl.tagging.fct(ctrl.search) : ctrl.search;
-                if ( angular.equals( ctrl.items[0], item ) ) {
+                if (!item || angular.equals( ctrl.items[0], item ) ) {
                   return;
                 }
               } else {
@@ -412,6 +412,7 @@
                 // use tagging function if we have one
                 if ( ctrl.tagging.fct !== undefined && typeof item === 'string' ) {
                   item = ctrl.tagging.fct(ctrl.search);
+                  if (!item) return;
                 // if item type is 'string', apply the tagging label
                 } else if ( typeof item === 'string' ) {
                   // trim the trailing space
@@ -420,7 +421,7 @@
               }
             }
             // search ctrl.selected for dupes potentially caused by tagging and return early if found
-            if ( ctrl.selected && ctrl.selected.filter( function (selection) { return angular.equals(selection, item); }).length > 0 ) {
+            if ( ctrl.selected && angular.isArray(ctrl.selected) && ctrl.selected.filter( function (selection) { return angular.equals(selection, item); }).length > 0 ) {
               ctrl.close(skipFocusser);
               return;
             }
@@ -456,6 +457,7 @@
     // Closes the dropdown
     ctrl.close = function(skipFocusser) {
       if (!ctrl.open) return;
+      if (ctrl.ngModel && ctrl.ngModel.$setTouched) ctrl.ngModel.$setTouched();
       _resetSearchInput();
       ctrl.open = false;
       if (!ctrl.multiple){
@@ -464,6 +466,12 @@
           if (!skipFocusser) ctrl.focusser[0].focus();
         },0,false);
       }
+    };
+
+    ctrl.clear = function($event) {
+      ctrl.select(undefined);
+      $event.stopPropagation();
+      ctrl.focusser[0].focus();
     };
 
     // Toggle dropdown
@@ -668,7 +676,7 @@
                 if ( ctrl.tagging.fct ) {
                   newItem = ctrl.tagging.fct( newItem );
                 }
-                ctrl.select( newItem, true);
+                if (newItem) ctrl.select(newItem, true);
               });
             }
           }
@@ -686,6 +694,24 @@
         _ensureHighlightVisible();
       }
 
+    });
+
+    // If tagging try to split by tokens and add items
+    _searchInput.on('paste', function (e) {
+      var data = e.originalEvent.clipboardData.getData('text/plain');
+      if (data && data.length > 0 && ctrl.taggingTokens.isActivated && ctrl.tagging.fct) {
+        var items = data.split(ctrl.taggingTokens.tokens[0]); // split by first token only
+        if (items && items.length > 0) {
+          angular.forEach(items, function (item) {
+            var newItem = ctrl.tagging.fct(item);
+            if (newItem) {
+              ctrl.select(newItem, true);
+            }
+          });
+          e.preventDefault();
+          e.stopPropagation();
+        }
+      }
     });
 
     _searchInput.on('keyup', function(e) {
@@ -733,6 +759,7 @@
           if ( stashArr.filter( function (origItem) { return angular.equals( origItem, ctrl.tagging.fct(ctrl.search) ); } ).length > 0 ) {
             return;
           }
+          newItem.isTag = true;
         // handle newItem string and stripping dupes in tagging string context
         } else {
           // find any tagging items already in the ctrl.items array and store them
@@ -808,7 +835,7 @@
         return false;
       }
       var hasDupe = arr.filter( function (origItem) {
-        if ( ctrl.search.toUpperCase() === undefined ) {
+        if ( ctrl.search.toUpperCase() === undefined || origItem === undefined ) {
           return false;
         }
         return origItem.toUpperCase() === ctrl.search.toUpperCase();
@@ -818,24 +845,26 @@
     }
 
     function _findApproxDupe(haystack, needle) {
-      var tempArr = angular.copy(haystack);
       var dupeIndex = -1;
-      for (var i = 0; i <tempArr.length; i++) {
-        // handle the simple string version of tagging
-        if ( ctrl.tagging.fct === undefined ) {
-          // search the array for the match
-          if ( tempArr[i]+' '+ctrl.taggingLabel === needle ) {
-            dupeIndex = i;
-          }
-        // handle the object tagging implementation
-        } else {
-          var mockObj = tempArr[i];
-          mockObj.isTag = true;
-          if ( angular.equals(mockObj, needle) ) {
-            dupeIndex = i;
-          }
-        }
-      }
+	  if(angular.isArray(haystack)) {
+		  var tempArr = angular.copy(haystack);
+		  for (var i = 0; i <tempArr.length; i++) {
+			// handle the simple string version of tagging
+			if ( ctrl.tagging.fct === undefined ) {
+			  // search the array for the match
+			  if ( tempArr[i]+' '+ctrl.taggingLabel === needle ) {
+				dupeIndex = i;
+			  }
+			// handle the object tagging implementation
+			} else {
+			  var mockObj = tempArr[i];
+			  mockObj.isTag = true;
+			  if ( angular.equals(mockObj, needle) ) {
+				dupeIndex = i;
+			  }
+			}
+		  }
+	  }
       return dupeIndex;
     }
 
@@ -872,7 +901,7 @@
     }
 
     $scope.$on('$destroy', function() {
-      _searchInput.off('keyup keydown tagged blur');
+      _searchInput.off('keyup keydown tagged blur paste');
     });
   }])
 
@@ -888,7 +917,7 @@
       },
       replace: true,
       transclude: true,
-      require: ['uiSelect', 'ngModel'],
+      require: ['uiSelect', '^ngModel'],
       scope: true,
 
       controller: 'uiSelectCtrl',
@@ -952,7 +981,11 @@
             if ($select.multiple){
               var resultMultiple = [];
               var checkFnMultiple = function(list, value){
-                if (!list || !list.length) return;
+                //if the list is empty add the value to the list
+                if (!list || !list.length){
+                    resultMultiple.unshift(value);
+                    return true;
+                }
                 for (var p = list.length - 1; p >= 0; p--) {
                   locals[$select.parserResult.itemName] = list[p];
                   result = $select.parserResult.modelMapper(scope, locals);
@@ -1162,6 +1195,8 @@
         };
 
         function onDocumentClick(e) {
+          if (!$select.open) return; //Skip it if dropdown is close
+
           var contains = false;
 
           if (window.jQuery) {
@@ -1173,7 +1208,12 @@
           }
 
           if (!contains && !$select.clickTriggeredSelect) {
-            $select.close(angular.element(e.target).closest('.ui-select-container.open').length > 0); // Skip focusser if the target is another select
+            //Will lose focus only with certain targets
+            var focusableControls = ['input','button','textarea'];
+            var targetScope = angular.element(e.target).scope(); //To check if target is other ui-select
+            var skipFocusser = targetScope && targetScope.$select && targetScope.$select !== $select; //To check if target is other ui-select
+            if (!skipFocusser) skipFocusser =  ~focusableControls.indexOf(e.target.tagName.toLowerCase()); //Check if target is input, button or textarea
+            $select.close(skipFocusser);
             scope.$digest();
           }
           $select.clickTriggeredSelect = false;
@@ -1197,6 +1237,7 @@
 
           var transcludedMatch = transcluded.querySelectorAll('.ui-select-match');
           transcludedMatch.removeAttr('ui-select-match'); //To avoid loop in case directive as attr
+          transcludedMatch.removeAttr('data-ui-select-match'); // Properly handle HTML5 data-attributes
           if (transcludedMatch.length !== 1) {
             throw uiSelectMinErr('transcluded', "Expected 1 .ui-select-match but got '{0}'.", transcludedMatch.length);
           }
@@ -1204,6 +1245,7 @@
 
           var transcludedChoices = transcluded.querySelectorAll('.ui-select-choices');
           transcludedChoices.removeAttr('ui-select-choices'); //To avoid loop in case directive as attr
+          transcludedChoices.removeAttr('data-ui-select-choices'); // Properly handle HTML5 data-attributes
           if (transcludedChoices.length !== 1) {
             throw uiSelectMinErr('transcluded', "Expected 1 .ui-select-choices but got '{0}'.", transcludedChoices.length);
           }
